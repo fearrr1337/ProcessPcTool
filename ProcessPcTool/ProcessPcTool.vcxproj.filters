@@ -7,6 +7,9 @@
     <Filter Include="GUI">
       <UniqueIdentifier>{80dbe09b-44da-40ef-9994-cb66bb35f095}</UniqueIdentifier>
     </Filter>
+    <Filter Include="IconLoader">
+      <UniqueIdentifier>{2bdb9d4f-8046-4039-ab14-b27e972709c1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ProcessInfo.h">
@@ -14,6 +17,9 @@
     </ClInclude>
     <ClInclude Include="gui.h">
       <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="IconLoader.h">
+      <Filter>IconLoader</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -23,6 +29,9 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="gui.cpp">
       <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="IconLoader.cpp">
+      <Filter>IconLoader</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

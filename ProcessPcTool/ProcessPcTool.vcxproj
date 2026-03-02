@@ -125,10 +125,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="gui.h" />
+    <ClInclude Include="IconLoader.h" />
     <ClInclude Include="ProcessInfo.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="gui.cpp" />
+    <ClCompile Include="IconLoader.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="ProcessInfo.cpp" />
   </ItemGroup>
