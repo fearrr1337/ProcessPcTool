@@ -1,12 +1,19 @@
-#define _CRT_SECURE_NO_WARNINGS
+п»ї#define _CRT_SECURE_NO_WARNINGS
 #include "gui.h"
 #include "IconLoader.h"
+#include "ProcessInfo.h"
 #include <unordered_map>
 #include <thread>
+#include <cstdio>   
+#include "SystemInfoWin.h"
 
 static std::unordered_map<std::string, Texture2D> g_textureCache;
 static Texture2D g_defaultIconTexture = { 0 };
 
+static double g_cachedSystemCpu = 0.0;
+
+
+// РґРµС„РѕР»С‚РЅР°СЏ РёРєРѕРЅРєР° РІ С‚РµРєСЃС‚СѓСЂСѓ
 static void CreateDefaultIcon() {
     if (g_defaultIconTexture.id != 0) return;
     int width, height;
@@ -40,6 +47,8 @@ static void CreateDefaultIcon() {
     g_defaultIconTexture = LoadTextureFromImage(image);
 }
 
+
+// С‡РёСЃС‚РёС‚ РєСЌС€
 static void CleanupTextureCache() {
     for (auto& pair : g_textureCache) {
         UnloadTexture(pair.second);
@@ -51,6 +60,7 @@ static void CleanupTextureCache() {
     }
 }
 
+// РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РµРєСЃС‚СѓСЂСѓ РїСЂРѕС†РµСЃСЃР°
 static Texture2D GetProcessTexture(const ProcessInfo& proc) {
     const std::string& path = proc.imagePath;
     if (path.empty()) {
@@ -86,225 +96,306 @@ static Texture2D GetProcessTexture(const ProcessInfo& proc) {
     return texture;
 }
 
-static void PreloadIconsAsync() {
-    for (const auto& proc : g_processes) {
-        if (!proc.imagePath.empty()) {
-            GetProcessTexture(proc);
-        }
-    }
+// С„РѕСЂРјР°С‚РёСЂРѕРІР°РЅРёРµ Р±/СЃ РІ РґСЂСѓРіРёРµ РІРёРґС‹
+static void FormatSpeed(char* buffer, size_t size, double bytesPerSec) {
+    if (bytesPerSec < 1024.0)
+        snprintf(buffer, size, "%.0f B/s", bytesPerSec);
+    else if (bytesPerSec < 1024.0 * 1024.0)
+        snprintf(buffer, size, "%.1f KB/s", bytesPerSec / 1024.0);
+    else if (bytesPerSec < 1024.0 * 1024.0 * 1024.0)
+        snprintf(buffer, size, "%.1f MB/s", bytesPerSec / (1024.0 * 1024.0));
+    else
+        snprintf(buffer, size, "%.2f GB/s", bytesPerSec / (1024.0 * 1024.0 * 1024.0));
 }
 
-int screenWidth = 1920;
-int screenHeight = 1080;
-
 void mainWindow() {
-    // Создаём окно с возможностью изменения размера
-    InitWindow(1280, 720, "ProcessMonitor");
-    SetWindowState(FLAG_WINDOW_RESIZABLE);  // разрешаем растягивание мышкой
-
+    InitWindow(1600, 800, "ProcessMonitor");
+    SetWindowState(FLAG_WINDOW_RESIZABLE);
+    Texture2D LoadingIcon = LoadTexture("icon.png");
+    Font gFont = LoadFontEx("C:\\Windows\\Fonts\\arial.ttf", 20, 0, 0);
+    Image iconImg = LoadImage("icon.png");
+    SetWindowIcon(iconImg);
     InitPerformanceCounters();
     ListProcesses();
     CollectProcessPaths();
 
-    // Загружаем иконки в фоне
+
+    // РџСЂРµРґРІР°СЂРёС‚РµР»СЊРЅР°СЏ Р·Р°РіСЂСѓР·РєР° РёРєРѕРЅРѕРє Рё РїСЂРѕС†РµСЃСЃРѕРІ
     BeginDrawing();
     ClearBackground(RAYWHITE);
-    DrawText("Loading icons...", 10, 30, 20, DARKGRAY);
+    DrawTexturePro(LoadingIcon,
+        { 0, 0, (float)LoadingIcon.width, (float)LoadingIcon.height },    
+        { 1600 / 2 - 128 / 2, 800 / 2 - 128 / 2, 128, 128 },                                        
+        { 0, 0 },                                                
+        0.0f,                                                  
+        WHITE);                                                
     EndDrawing();
+    static SystemInfoData sysInfo = GetSystemInfoData();
 
-    std::thread preloadThread(PreloadIconsAsync);
-    preloadThread.detach();
 
     SetTargetFPS(60);
 
-    // Переменные для вкладок
-    int currentTab = 0;              // 0 - процессы, 1 - вторая страница
+    int currentTab = 0;
     const int tabCount = 2;
-    const char* tabNames[2] = { "Processes", "Second" };
-    const int tabHeight = 30;
-    const int tabWidth = 100;
+    const char* tabNames[2] = { "Processes", "PC Info" };
+    const int tabHeight = 40;
+    const int tabWidth = 120;
+    const int itemHeight = 30;
+    int scrollOffset = 0;
 
-    const int itemHeight = 20;       // высота строки таблицы
-    int scrollOffset = 0;             // смещение скролла
+    int rightClickedIndex = -1;
+    bool showContextMenu = false;
+    Rectangle contextMenuRect = { 0 };
 
     while (!WindowShouldClose()) {
-        // Получаем текущие размеры окна
         int screenWidth = GetScreenWidth();
         int screenHeight = GetScreenHeight();
 
-        // Обновление данных процессов раз в секунду
+        // РѕР±РЅРѕРІР»РµРЅРёРµ СЃС‚Р°С‚РёСЃС‚РёРєРё
         static double lastUpdate = GetTime();
         if (GetTime() - lastUpdate >= 1.0) {
+            g_cachedSystemCpu = GetSystemCpuUsage();
             UpdateProcessesStats();
             std::sort(g_processes.begin(), g_processes.end(),
-                [](const ProcessInfo& a, const ProcessInfo& b) {
-                    return a.cpuUsage > b.cpuUsage;
-                });
+                [](const ProcessInfo& a, const ProcessInfo& b) { return a.cpuUsage > b.cpuUsage; });
             lastUpdate = GetTime();
         }
 
-        // Обработка ввода мыши для вкладок
+        // СЃРёСЃС‚РµРјРЅС‹Рµ РјРµС‚СЂРёРєРё
+        double sysCpu = g_cachedSystemCpu;
+        DWORDLONG totalPhys, availPhys;
+        GetSystemMemoryInfo(totalPhys, availPhys);
+        double diskRead = GetDiskReadSpeed();
+        double diskWrite = GetDiskWriteSpeed();
+        double netUpload = GetNetworkUploadSpeed();
+        double netDownload = GetNetworkDownloadSpeed();
+
         Vector2 mousePoint = GetMousePosition();
         bool mousePressed = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+        bool mouseRightPressed = IsMouseButtonPressed(MOUSE_RIGHT_BUTTON);
+
+        // РїРµСЂРµРєР»СЋС‡РµРЅРёРµ РІРєР»Р°РґРѕРє РїСЂРё РєР»РёРєРµ
         if (mousePressed) {
-            // Проверяем клик по вкладкам
             for (int i = 0; i < tabCount; i++) {
-                Rectangle tabRect = { 10.0f + i * (tabWidth + 5), 40.0f, (float)tabWidth, (float)tabHeight };
+                Rectangle tabRect = { 10 + i * (tabWidth + 5), 5, (float)tabWidth, (float)tabHeight };
                 if (CheckCollisionPointRec(mousePoint, tabRect)) {
                     currentTab = i;
-                    // Сбрасываем скролл при смене вкладки (опционально)
                     scrollOffset = 0;
                 }
             }
         }
 
-        // Обработка скролла колёсиком только для вкладки процессов
+        // РїСЂРѕРєСЂСѓС‚РєР° СЃРїРёСЃРєР° РїСЂРѕС†РµСЃСЃРѕРІ
         if (currentTab == 0) {
             float wheel = GetMouseWheelMove();
             if (wheel != 0) {
-                // Вычисляем область таблицы, чтобы скроллить только когда мышь внутри неё
-                Rectangle listRect = {
-                    10.0f,
-                    40.0f + tabHeight + 10,
-                    (float)screenWidth - 20,
-                    (float)screenHeight - (40.0f + tabHeight + 10 + 10)  // отступ снизу
-                };
+                Rectangle listRect = { 10, 40 + tabHeight + 10 + 60, (float)screenWidth - 20, (float)screenHeight - (40 + tabHeight + 10 + 60 + 10) };
                 if (CheckCollisionPointRec(mousePoint, listRect)) {
-                    scrollOffset -= static_cast<int>(wheel * itemHeight * 3);
+                    scrollOffset -= (int)(wheel * itemHeight * 3);
                     if (scrollOffset < 0) scrollOffset = 0;
-                    int maxScroll = static_cast<int>(g_processes.size()) * itemHeight
-                                    - static_cast<int>(listRect.height - 20); // высота заголовка таблицы ~20
+                    int maxScroll = (int)g_processes.size() * itemHeight - (int)(listRect.height - 20);
                     if (maxScroll < 0) maxScroll = 0;
                     if (scrollOffset > maxScroll) scrollOffset = maxScroll;
                 }
             }
         }
 
+        // РјРµРЅСЋ РїСЂРѕС†РµСЃСЃР°(Р·Р°РєСЂС‹С‚СЊ РїСЂРѕС†РµСЃСЃ) РїСЂРё РїРєРј
+        if (currentTab == 0 && mouseRightPressed) {
+            Rectangle listRect = { 10, 40 + tabHeight + 10 + 60, (float)screenWidth - 20, (float)screenHeight - (40 + tabHeight + 10 + 60 + 10) };
+            if (CheckCollisionPointRec(mousePoint, listRect)) {
+                int y = (int)mousePoint.y - (int)(listRect.y + 20) + scrollOffset;
+                int index = y / itemHeight;
+                if (index >= 0 && index < (int)g_processes.size()) {
+                    rightClickedIndex = index;
+                    showContextMenu = true;
+                    contextMenuRect = { mousePoint.x, mousePoint.y, 140, 35 };
+                }
+            }
+        }
+
+        // Р·Р°РєСЂС‹С‚РёРµ РїСЂРѕС†РµСЃСЃР° РїСЂРё РЅР°Р¶Р°С‚РёРё РєРЅРѕРїРєРё
+        if (showContextMenu && mousePressed) {
+            if (CheckCollisionPointRec(mousePoint, contextMenuRect)) {
+                if (rightClickedIndex >= 0 && rightClickedIndex < (int)g_processes.size()) {
+                    DWORD pid = g_processes[rightClickedIndex].pid;
+                    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+                    if (hProcess) {
+                        TerminateProcess(hProcess, 1);
+                        CloseHandle(hProcess);
+                    }
+                }
+            }
+            showContextMenu = false;
+            rightClickedIndex = -1;
+        }
+
+        
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        // Заголовок окна
-        DrawText("Process Monitor", 10, 10, 20, DARKGRAY);
-
-        // Отрисовка вкладок
+        // 2 РІРєР»Р°РґРєРё
         for (int i = 0; i < tabCount; i++) {
-            Rectangle tabRect = { 10.0f + i * (tabWidth + 5), 40.0f, (float)tabWidth, (float)tabHeight };
+            Rectangle tabRect = { 10 + i * (tabWidth + 5), 5, (float)tabWidth, (float)tabHeight };
             Color bgColor = (i == currentTab) ? WHITE : LIGHTGRAY;
             DrawRectangleRec(tabRect, bgColor);
-            DrawRectangleLinesEx(tabRect, 1, GRAY);
-            // Центрируем текст вкладки
-            int textWidth = MeasureText(tabNames[i], 10);
-            DrawText(tabNames[i],
-                     tabRect.x + (tabRect.width - textWidth) / 2,
-                     tabRect.y + (tabRect.height - 10) / 2,
-                     10, BLACK);
+            DrawRectangleLinesEx(tabRect, 2, GRAY);
+            int textW = MeasureTextEx(gFont, tabNames[i], 20, 2).x;
+            DrawTextEx(gFont, tabNames[i], { tabRect.x + (tabRect.width - textW) / 2, tabRect.y + (tabRect.height - 20) / 2 }, 20, 2, BLACK);
         }
 
-        // Отображаем содержимое в зависимости от выбранной вкладки
         if (currentTab == 0) {
-            // Вкладка процессов
-            // Область таблицы: отступы 10px со всех сторон, учитывая заголовок и вкладки
-            Rectangle listRect = {
-                10.0f,
-                40.0f + tabHeight + 10,
-                (float)screenWidth - 20,
-                (float)screenHeight - (40.0f + tabHeight + 10 + 10)  // нижний отступ 10px
-            };
+            Rectangle summaryRect = { 10, 5 + tabHeight + 10, (float)screenWidth - 20, 60 };
+            DrawRectangleRec(summaryRect, LIGHTGRAY);
+            DrawRectangleLinesEx(summaryRect, 2, GRAY);
 
-            // Заголовок таблицы
-            Rectangle headerRect = { listRect.x, listRect.y, listRect.width, 20 };
-            DrawRectangleRec(headerRect, LIGHTGRAY);
-            DrawRectangleLinesEx(headerRect, 1, GRAY);
+            char buffer[128];
+            int yPos = summaryRect.y + 10;
+            snprintf(buffer, sizeof(buffer), "CPU: %.1f%%", sysCpu);
+            DrawTextEx(gFont, buffer, { (float)summaryRect.x + 5, (float)yPos }, 20, 2, BLACK);
 
-            // Рассчитываем позиции колонок в зависимости от ширины окна
-            const int colIconW = 20;
-            const int colPidW = 50;
-            const int colCpuW = 70;
-            const int colMemW = 90;
-            int colNameW = listRect.width - (colIconW + colPidW + colCpuW + colMemW + 20); // +20 на отступы
+            double memUsedPercent = (totalPhys - availPhys) * 100.0 / totalPhys;
+            snprintf(buffer, sizeof(buffer), "Memory: %.1f%% (%.1f/%.1f GB)", memUsedPercent, (totalPhys - availPhys) / 1024.0 / 1024.0 / 1024.0, totalPhys / 1024.0 / 1024.0 / 1024.0);
+            DrawTextEx(gFont, buffer, { (float)summaryRect.x + 220, (float)yPos }, 20, 2, BLACK);
 
-            int colIconX = listRect.x + 5;
-            int colPidX = colIconX + colIconW + 5;
-            int colNameX = colPidX + colPidW + 5;
-            int colCpuX = colNameX + colNameW + 5;
-            int colMemX = colCpuX + colCpuW + 5;
+            // РўР°Р±Р»РёС†Р° РїСЂРѕС†РµСЃСЃРѕРІ
+            Rectangle listRect = { 10, summaryRect.y + summaryRect.height + 5, (float)screenWidth - 20, (float)screenHeight - (summaryRect.y + summaryRect.height + 5 + 10) };
 
-            // Текст заголовков
-            DrawText("PID", colPidX, listRect.y + 4, 10, DARKGRAY);
-            DrawText("Name", colNameX, listRect.y + 4, 10, DARKGRAY);
-            DrawText("CPU%", colCpuX, listRect.y + 4, 10, DARKGRAY);
-            DrawText("Memory (KB)", colMemX, listRect.y + 4, 10, DARKGRAY);
+            const int colIconW = 30, colPidW = 60, colCpuW = 80, colMemW = 100, colDiskRW = 150, colNetW = 120;
+            int colNameW = listRect.width - (colIconW + colPidW + colCpuW + colMemW + colDiskRW + colNetW + 40);
+            int colIconX = listRect.x + 5, colPidX = colIconX + colIconW + 5, colNameX = colPidX + colPidW + 5;
+            int colCpuX = colNameX + colNameW + 5, colMemX = colCpuX + colCpuW + 5, colDiskX = colMemX + colMemW + 5, colNetX = colDiskX + colDiskRW + 5;
 
-            // Область прокрутки списка процессов
-            BeginScissorMode(listRect.x, listRect.y + 20,
-                             listRect.width, listRect.height - 20);
+            DrawTextEx(gFont, "PID", { (float)colPidX,listRect.y + 4 }, 18, 1, DARKGRAY);
+            DrawTextEx(gFont, "Name", { (float)colNameX,listRect.y + 4 }, 18, 1, DARKGRAY);
+            DrawTextEx(gFont, "CPU%", { (float)colCpuX,listRect.y + 4 }, 18, 1, DARKGRAY);
+            DrawTextEx(gFont, "Memory (KB)", { (float)colMemX,listRect.y + 4 }, 18, 1, DARKGRAY);
+            DrawTextEx(gFont, "Disk R/W (B/s)", { (float)colDiskX,listRect.y + 4 }, 18, 1, DARKGRAY);
+            DrawTextEx(gFont, "Network (B/s)", { (float)colNetX,listRect.y + 4 }, 18, 1, DARKGRAY);
 
-            int yPos = listRect.y + 20 - scrollOffset;
-            for (const auto& p : g_processes) {
-                if (yPos + itemHeight > listRect.y + 20 &&
-                    yPos < listRect.y + listRect.height) {
+            BeginScissorMode(listRect.x, listRect.y + 20, listRect.width, listRect.height - 20);
+            int yDraw = listRect.y + 20 - scrollOffset;
+            for (size_t i = 0; i < g_processes.size(); ++i) {
+                const auto& p = g_processes[i];
+                if (yDraw + itemHeight > listRect.y + 20 && yDraw < listRect.y + listRect.height) {
+                    // РџРѕРґСЃРІРµС‚РєР° СЃС‚СЂРѕРєРё
+                    if (mousePoint.y > yDraw && mousePoint.y < yDraw + itemHeight)
+                        DrawRectangleRec({ listRect.x,(float)yDraw,listRect.width,(float)itemHeight }, Fade(LIGHTGRAY, 0.3f));
 
-                    // Иконка процесса
+                    // РРєРѕРЅРєР°
                     Texture2D tex = GetProcessTexture(p);
-                    if (tex.id != 0) {
-                        DrawTexture(tex, colIconX, yPos + (itemHeight - tex.height) / 2, WHITE);
-                    }
+                    if (tex.id != 0) DrawTexture(tex, colIconX, yDraw + (itemHeight - tex.height) / 2, WHITE);
 
                     // PID
-                    char pidStr[16];
-                    sprintf(pidStr, "%5d", p.pid);
-                    DrawText(pidStr, colPidX, yPos + 2, 10, BLACK);
+                    snprintf(buffer, sizeof(buffer), "%5d", p.pid);
+                    DrawTextEx(gFont, buffer, { (float)colPidX,(float)yDraw + 4 }, 18, 1, BLACK);
 
-                    // Имя процесса (обрезаем, если слишком длинное)
+                    // Name
                     std::string nameStr(p.name.begin(), p.name.end());
-                    if (MeasureText(nameStr.c_str(), 10) > colNameW) {
-                        // Простое обрезание по символам (можно улучшить)
-                        while (!nameStr.empty() && MeasureText(nameStr.c_str(), 10) > colNameW - 10) {
-                            nameStr.pop_back();
-                        }
+                    if (MeasureTextEx(gFont, nameStr.c_str(), 18, 1).x > colNameW) {
+                        while (!nameStr.empty() && MeasureTextEx(gFont, nameStr.c_str(), 18, 1).x > colNameW - 10) nameStr.pop_back();
                         nameStr += "...";
                     }
-                    DrawText(nameStr.c_str(), colNameX, yPos + 2, 10, BLACK);
+                    DrawTextEx(gFont, nameStr.c_str(), { (float)colNameX,(float)yDraw + 4 }, 18, 1, BLACK);
 
                     // CPU
-                    char cpuStr[16];
-                    sprintf(cpuStr, "%5.1f%%", p.cpuUsage);
-                    DrawText(cpuStr, colCpuX, yPos + 2, 10, BLACK);
+                    snprintf(buffer, sizeof(buffer), "%5.1f%%", p.cpuUsage);
+                    DrawTextEx(gFont, buffer, { (float)colCpuX,(float)yDraw + 4 }, 18, 1, BLACK);
 
-                    // Память
-                    char memStr[32];
-                    sprintf(memStr, "%7.0f", p.workingSetSize / 1024.0);
-                    DrawText(memStr, colMemX, yPos + 2, 10, BLACK);
+                    // Memory
+                    snprintf(buffer, sizeof(buffer), "%7.0f", p.workingSetSize / 1024.0);
+                    DrawTextEx(gFont, buffer, { (float)colMemX,(float)yDraw + 4 }, 18, 1, BLACK);
+
+                    // Disk
+                    char diskReadSpd[16], diskWriteSpd[16];
+                    FormatSpeed(diskReadSpd, sizeof(diskReadSpd), p.ioReadSpeed);
+                    FormatSpeed(diskWriteSpd, sizeof(diskWriteSpd), p.ioWriteSpeed);
+                    snprintf(buffer, sizeof(buffer), "%s / %s", diskReadSpd, diskWriteSpd);
+                    DrawTextEx(gFont, buffer, { (float)colDiskX,(float)yDraw + 4 }, 18, 1, BLACK);
+
+                    // Network
+                    char netSpd[16];
+                    FormatSpeed(netSpd, sizeof(netSpd), p.ioNetworkSpeed);
+                    DrawTextEx(gFont, netSpd, { (float)colNetX,(float)yDraw + 4 }, 18, 1, BLACK);
                 }
-                yPos += itemHeight;
+                yDraw += itemHeight;
             }
-
             EndScissorMode();
 
-            // Дополнительно: полоса прокрутки (опционально)
-            // Можно нарисовать простой индикатор
-            int totalHeight = g_processes.size() * itemHeight;
-            int visibleHeight = listRect.height - 20;
+            // РџРѕР»РѕСЃР° РїСЂРѕРєСЂСѓС‚РєРё
+            int totalHeight = (int)g_processes.size() * itemHeight;
+            int visibleHeight = (int)(listRect.height - 20);
             if (totalHeight > visibleHeight) {
                 float thumbHeight = (float)visibleHeight / totalHeight * visibleHeight;
                 float thumbPos = (float)scrollOffset / totalHeight * visibleHeight;
-                Rectangle scrollBar = {
-                    listRect.x + listRect.width - 8,
-                    listRect.y + 20 + thumbPos,
-                    6,
-                    thumbHeight
-                };
-                DrawRectangleRec(scrollBar, GRAY);
+                DrawRectangleRec({ listRect.x + listRect.width - 8,listRect.y + 20 + thumbPos,6,thumbHeight }, DARKGRAY);
             }
-        } else {
-            // Вторая вкладка (пустая)
-            DrawText("Second Tab - Empty", 20, 100, 20, DARKGRAY);
+
+            // РљРѕРЅС‚РµРєСЃС‚РЅРѕРµ РјРµРЅСЋ
+            if (showContextMenu) {
+                DrawRectangleRec(contextMenuRect, DARKBLUE);
+                DrawRectangleLinesEx(contextMenuRect, 2, BLUE);
+                int textW = MeasureTextEx(gFont, "Terminate", 16, 1).x;
+                DrawTextEx(gFont, "Terminate", { contextMenuRect.x + (contextMenuRect.width - textW) / 2,contextMenuRect.y + (contextMenuRect.height - 16) / 2 }, 16, 1, WHITE);
+            }
+        }
+        else {
+            int y = 60;
+            char buffer[256];
+
+            snprintf(buffer, sizeof(buffer), "Processor: %s", sysInfo.processorName.c_str());
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            snprintf(buffer, sizeof(buffer), "Cores: %u", sysInfo.cores);
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            snprintf(buffer, sizeof(buffer), "Logical Processors: %u", sysInfo.logicalProcessors);
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            snprintf(buffer, sizeof(buffer), "Memory: %.1f / %.1f GB", sysInfo.usedMemoryGB, sysInfo.totalMemoryGB);
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            snprintf(buffer, sizeof(buffer), "GPU: %s", sysInfo.gpuName.c_str());
+            DrawTextEx(gFont, buffer, { 20, (float)y }, 20, 2, BLACK); y += 30;
+
+            char computerName[256];
+            DWORD compSize = sizeof(computerName);
+            GetComputerNameA(computerName, &compSize);
+
+            snprintf(buffer, sizeof(buffer), "Computer Name: %s", computerName);
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            char username[256];
+            DWORD userSize = sizeof(username);
+            GetUserNameA(username, &userSize);
+
+            snprintf(buffer, sizeof(buffer), "User: %s", username);
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            ULONGLONG uptime = GetTickCount64() / 1000;
+
+            snprintf(buffer, sizeof(buffer), "System Uptime: %llu sec", uptime);
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            SYSTEM_INFO si;
+            GetSystemInfo(&si);
+
+            snprintf(buffer, sizeof(buffer), "CPU Architecture: %u", si.wProcessorArchitecture);
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            snprintf(buffer, sizeof(buffer), "Page Size: %u", si.dwPageSize);
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
+            snprintf(buffer, sizeof(buffer), "Processes Running: %zu", g_processes.size());
+            DrawTextEx(gFont, buffer, { 20,(float)y }, 20, 2, BLACK); y += 30;
+
         }
 
         EndDrawing();
     }
 
-    // Очистка ресурсов
+    
+    UnloadFont(gFont);
     CleanupTextureCache();
     CleanupIconCache();
     ClosePerformanceCounters();

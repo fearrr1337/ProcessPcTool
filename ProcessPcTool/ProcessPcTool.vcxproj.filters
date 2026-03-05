@@ -10,6 +10,9 @@
     <Filter Include="IconLoader">
       <UniqueIdentifier>{2bdb9d4f-8046-4039-ab14-b27e972709c1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="SystemInfoWin">
+      <UniqueIdentifier>{eee81473-894f-427d-8da3-6d0b99056af1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ProcessInfo.h">
@@ -20,6 +23,9 @@
     </ClInclude>
     <ClInclude Include="IconLoader.h">
       <Filter>IconLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="SystemInfoWin.h">
+      <Filter>SystemInfoWin</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -32,6 +38,9 @@
     </ClCompile>
     <ClCompile Include="IconLoader.cpp">
       <Filter>IconLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="SystemInfoWin.cpp">
+      <Filter>SystemInfoWin</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

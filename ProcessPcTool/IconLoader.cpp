@@ -2,10 +2,10 @@
 #define NOMINMAX
 #include <windows.h>
 #include <shellapi.h>
-#include <commctrl.h>
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include "IconLoader.h"
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -18,50 +18,66 @@ struct CachedIcon {
 
 static std::unordered_map<std::string, CachedIcon> g_pixelsCache;
 
-static bool IconToPixels(HICON hIcon, int targetSize, std::vector<unsigned char>& outPixels) {
-    HDC hdcScreen = GetDC(NULL);
-    BITMAPV5HEADER bi = { 0 };
+
+// системную иконку HICON в RGBA
+static bool IconToPixels(HICON hIcon, int size, std::vector<unsigned char>& outPixels)
+{
+    HDC hdc = GetDC(NULL);
+
+    BITMAPV5HEADER bi{};
     bi.bV5Size = sizeof(BITMAPV5HEADER);
-    bi.bV5Width = targetSize;
-    bi.bV5Height = -targetSize;
+    bi.bV5Width = size;
+    bi.bV5Height = -size;
     bi.bV5Planes = 1;
     bi.bV5BitCount = 32;
     bi.bV5Compression = BI_RGB;
-    bi.bV5AlphaMask = 0xFF000000;
-    bi.bV5RedMask = 0x00FF0000;
-    bi.bV5GreenMask = 0x0000FF00;
-    bi.bV5BlueMask = 0x000000FF;
 
     void* bits = nullptr;
-    HBITMAP hBitmap = CreateDIBSection(hdcScreen, (BITMAPINFO*)&bi, DIB_RGB_COLORS, &bits, NULL, 0);
+
+    HBITMAP hBitmap = CreateDIBSection(
+        hdc,
+        (BITMAPINFO*)&bi,
+        DIB_RGB_COLORS,
+        &bits,
+        NULL,
+        0);
+
     if (!hBitmap) {
-        ReleaseDC(NULL, hdcScreen);
+        ReleaseDC(NULL, hdc);
         return false;
     }
 
-    HDC hdcMem = CreateCompatibleDC(hdcScreen);
-    SelectObject(hdcMem, hBitmap);
-    DrawIconEx(hdcMem, 0, 0, hIcon, targetSize, targetSize, 0, NULL, DI_NORMAL);
+    HDC mem = CreateCompatibleDC(hdc);
+    SelectObject(mem, hBitmap);
 
-    outPixels.resize(targetSize * targetSize * 4);
+    DrawIconEx(mem, 0, 0, hIcon, size, size, 0, NULL, DI_NORMAL);
+
+    outPixels.resize(size * size * 4);
+
     unsigned char* src = (unsigned char*)bits;
     unsigned char* dst = outPixels.data();
-    for (int i = 0; i < targetSize * targetSize; ++i) {
+
+    for (int i = 0; i < size * size; i++)
+    {
         dst[i * 4 + 0] = src[i * 4 + 2];
         dst[i * 4 + 1] = src[i * 4 + 1];
         dst[i * 4 + 2] = src[i * 4 + 0];
         dst[i * 4 + 3] = src[i * 4 + 3];
     }
 
-    DeleteDC(hdcMem);
+    DeleteDC(mem);
     DeleteObject(hBitmap);
-    ReleaseDC(NULL, hdcScreen);
+    ReleaseDC(NULL, hdc);
+
     return true;
 }
 
-bool GetProcessIconPixels(const std::string& path, int& width, int& height, const unsigned char*& pixels, int targetSize) {
-    std::string cacheKey = path + "#" + std::to_string(targetSize);
-    auto it = g_pixelsCache.find(cacheKey);
+// получает иконку .exe с кэшированием пикселей RGBA
+bool GetProcessIconPixels(const std::string& path, int& width, int& height, const unsigned char*& pixels, int size)
+{
+    std::string key = path + "#" + std::to_string(size);
+
+    auto it = g_pixelsCache.find(key);
     if (it != g_pixelsCache.end()) {
         width = it->second.width;
         height = it->second.height;
@@ -69,65 +85,95 @@ bool GetProcessIconPixels(const std::string& path, int& width, int& height, cons
         return true;
     }
 
-    HICON hIcon = NULL;
-    UINT num = ExtractIconExA(path.c_str(), 0, &hIcon, NULL, 1);
-    if (num == 0 || hIcon == NULL) {
-        SHFILEINFOA sfi;
-        if (SHGetFileInfoA(path.c_str(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON)) {
-            hIcon = sfi.hIcon;
-        }
-        else {
-            return false;
-        }
+    SHFILEINFOA sfi{};
+
+    if (!SHGetFileInfoA(
+        path.c_str(),
+        FILE_ATTRIBUTE_NORMAL,
+        &sfi,
+        sizeof(sfi),
+        SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES))
+    {
+        return GetDefaultExeIconPixels(width, height, pixels, size);
     }
 
+    HICON hIcon = sfi.hIcon;
+    if (!hIcon)
+        return GetDefaultExeIconPixels(width, height, pixels, size);
+
     CachedIcon cached;
-    cached.width = targetSize;
-    cached.height = targetSize;
-    if (!IconToPixels(hIcon, targetSize, cached.pixels)) {
+    cached.width = size;
+    cached.height = size;
+
+    if (!IconToPixels(hIcon, size, cached.pixels)) {
+        DestroyIcon(hIcon);
+        return GetDefaultExeIconPixels(width, height, pixels, size);
+    }
+
+    DestroyIcon(hIcon);
+
+    width = cached.width;
+    height = cached.height;
+
+    pixels = cached.pixels.data();
+
+    g_pixelsCache[key] = std::move(cached);
+
+    return true;
+}
+
+// получает стандартную иконку .exe
+bool GetDefaultExeIconPixels(int& width, int& height, const unsigned char*& pixels, int size)
+{
+    std::string key = "DEFAULT_EXE#" + std::to_string(size);
+
+    auto it = g_pixelsCache.find(key);
+    if (it != g_pixelsCache.end()) {
+        width = it->second.width;
+        height = it->second.height;
+        pixels = it->second.pixels.data();
+        return true;
+    }
+
+    SHFILEINFOA sfi{};
+
+    if (!SHGetFileInfoA(
+        ".exe",
+        FILE_ATTRIBUTE_NORMAL,
+        &sfi,
+        sizeof(sfi),
+        SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES))
+    {
+        return false;
+    }
+
+    HICON hIcon = sfi.hIcon;
+    if (!hIcon) return false;
+
+    CachedIcon cached;
+    cached.width = size;
+    cached.height = size;
+
+    if (!IconToPixels(hIcon, size, cached.pixels)) {
         DestroyIcon(hIcon);
         return false;
     }
 
     DestroyIcon(hIcon);
-    width = cached.width;
-    height = cached.height;
-    pixels = cached.pixels.data();
-    g_pixelsCache[cacheKey] = std::move(cached);
-    return true;
-}
-
-bool GetDefaultExeIconPixels(int& width, int& height, const unsigned char*& pixels, int targetSize) {
-    std::string cacheKey = "DEFAULT_EXE#" + std::to_string(targetSize);
-    auto it = g_pixelsCache.find(cacheKey);
-    if (it != g_pixelsCache.end()) {
-        width = it->second.width;
-        height = it->second.height;
-        pixels = it->second.pixels.data();
-        return true;
-    }
-
-    SHFILEINFOA sfi = { 0 };
-    if (!SHGetFileInfoA("*.exe", FILE_ATTRIBUTE_NORMAL, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES)) {
-        return false;
-    }
-    HICON hIcon = sfi.hIcon;
-    if (!hIcon) return false;
-
-    CachedIcon cached;
-    cached.width = targetSize;
-    cached.height = targetSize;
-    bool ok = IconToPixels(hIcon, targetSize, cached.pixels);
-    DestroyIcon(hIcon);
-    if (!ok) return false;
 
     width = cached.width;
     height = cached.height;
+
     pixels = cached.pixels.data();
-    g_pixelsCache[cacheKey] = std::move(cached);
+
+    g_pixelsCache[key] = std::move(cached);
+
     return true;
 }
 
-void CleanupIconCache() {
+
+// чистит кэш
+void CleanupIconCache()
+{
     g_pixelsCache.clear();
 }

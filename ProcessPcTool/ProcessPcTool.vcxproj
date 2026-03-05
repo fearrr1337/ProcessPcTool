@@ -127,12 +127,14 @@
     <ClInclude Include="gui.h" />
     <ClInclude Include="IconLoader.h" />
     <ClInclude Include="ProcessInfo.h" />
+    <ClInclude Include="SystemInfoWin.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="gui.cpp" />
     <ClCompile Include="IconLoader.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="ProcessInfo.cpp" />
+    <ClCompile Include="SystemInfoWin.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

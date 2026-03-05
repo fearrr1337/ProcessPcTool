@@ -6,5 +6,8 @@
 #include <cstdio>
 #include <algorithm>
 
-extern int screenWidth, screenHeight;
+static void CreateDefaultIcon();
+static void CleanupTextureCache();
+static Texture2D GetProcessTexture(const ProcessInfo& proc);
+static void FormatSpeed(char* buffer, size_t size, double bytesPerSec);
 void mainWindow();
