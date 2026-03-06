@@ -1,4 +1,4 @@
-﻿#define _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
 #include "gui.h"
 #include "IconLoader.h"
 #include "ProcessInfo.h"
@@ -124,11 +124,11 @@ void mainWindow() {
     BeginDrawing();
     ClearBackground(RAYWHITE);
     DrawTexturePro(LoadingIcon,
-        { 0, 0, (float)LoadingIcon.width, (float)LoadingIcon.height },    
-        { 1600 / 2 - 128 / 2, 800 / 2 - 128 / 2, 128, 128 },                                        
-        { 0, 0 },                                                
-        0.0f,                                                  
-        WHITE);                                                
+        { 0, 0, (float)LoadingIcon.width, (float)LoadingIcon.height },
+        { 1600 / 2 - 128 / 2, 800 / 2 - 128 / 2, 128, 128 },
+        { 0, 0 },
+        0.0f,
+        WHITE);
     EndDrawing();
     static SystemInfoData sysInfo = GetSystemInfoData();
 
@@ -230,7 +230,7 @@ void mainWindow() {
             rightClickedIndex = -1;
         }
 
-        
+
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
@@ -250,7 +250,7 @@ void mainWindow() {
             DrawRectangleLinesEx(summaryRect, 2, GRAY);
 
             char buffer[128];
-            int yPos = summaryRect.y + 10;
+            int yPos = summaryRect.y + 20;
             snprintf(buffer, sizeof(buffer), "CPU: %.1f%%", sysCpu);
             DrawTextEx(gFont, buffer, { (float)summaryRect.x + 5, (float)yPos }, 20, 2, BLACK);
 
@@ -394,7 +394,7 @@ void mainWindow() {
         EndDrawing();
     }
 
-    
+
     UnloadFont(gFont);
     CleanupTextureCache();
     CleanupIconCache();
