@@ -116,6 +116,7 @@ void mainWindow() {
     Image iconImg = LoadImage("icon.png");
     SetWindowIcon(iconImg);
     InitPerformanceCounters();
+    ListProcesses();
     CollectProcessPaths();
 
 
