@@ -1,4 +1,4 @@
-﻿#include "ProcessInfo.h"
+#include "ProcessInfo.h"
 
 std::vector<ProcessInfo> g_processes;
 
