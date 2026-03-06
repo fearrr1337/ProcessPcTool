@@ -116,7 +116,6 @@ void mainWindow() {
     Image iconImg = LoadImage("icon.png");
     SetWindowIcon(iconImg);
     InitPerformanceCounters();
-    ListProcesses();
     CollectProcessPaths();
 
 
@@ -150,15 +149,36 @@ void mainWindow() {
     while (!WindowShouldClose()) {
         int screenWidth = GetScreenWidth();
         int screenHeight = GetScreenHeight();
+        
 
         // обновление статистики
+
+        static bool pauseProcess = false;
+        static std::vector<ProcessInfo> snapshotProcesses;
         static double lastUpdate = GetTime();
-        if (GetTime() - lastUpdate >= 1.0) {
+
+        if (currentTab == 0 && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { 
+            pauseProcess = !pauseProcess;
+
+            if (pauseProcess) {
+                snapshotProcesses = g_processes;
+            }
+        }
+
+        if (!pauseProcess && (GetTime() - lastUpdate >= 1.0)) {
             g_cachedSystemCpu = GetSystemCpuUsage();
             UpdateProcessesStats();
             std::sort(g_processes.begin(), g_processes.end(),
                 [](const ProcessInfo& a, const ProcessInfo& b) { return a.cpuUsage > b.cpuUsage; });
             lastUpdate = GetTime();
+        }
+
+        if (pauseProcess) {
+            DrawText("PAUSED (Press RMB to resume)", 300, 15, 20, RED);
+            g_processes = snapshotProcesses;
+        }
+        else {
+            DrawText("RUNNING (Press RMB to pause)", 300, 15, 20, GREEN);
         }
 
         // системные метрики
@@ -214,6 +234,7 @@ void mainWindow() {
             }
         }
 
+        
         // закрытие процесса при нажатии кнопки
         if (showContextMenu && mousePressed) {
             if (CheckCollisionPointRec(mousePoint, contextMenuRect)) {
@@ -222,6 +243,9 @@ void mainWindow() {
                     HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
                     if (hProcess) {
                         TerminateProcess(hProcess, 1);
+                        auto it = std::remove_if(g_processes.begin(), g_processes.end(),
+                            [pid](const ProcessInfo& proc) { return proc.pid == pid; });
+                        g_processes.erase(it, g_processes.end());
                         CloseHandle(hProcess);
                     }
                 }
